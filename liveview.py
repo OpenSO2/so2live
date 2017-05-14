@@ -3,16 +3,9 @@ import numpy as np
 import socket
 import struct
 import time
-
-from PIL import Image
-
-import io
 import sys
-import tempfile
-from scipy import misc
-import errno
-from matplotlib.widgets import Slider, Button, RadioButtons
-import matplotlib.image as mpimg
+import png
+import itertools
 
 if (len(sys.argv) != 3):
 	print "usage: ", sys.argv[0], "tcp-socket-address", "tcp-socket-port"
@@ -35,78 +28,68 @@ def r(c):
 	l = struct.pack("I", 3)
 	cmd = struct.pack("ccc", c[0], c[1], c[2])
 
-	print "send length"
-	print s
 	s.send(l)
-
-	#~ print "send cmd"
 	s.send(cmd)
 
 	buf = ''
 	while len(buf) < 4:
 		buf += s.recv(4 - len(buf))
 	size = struct.unpack('i', buf)[0]
-	print "receiving %s bytes" % size
 
-	img_rcv = np.empty(size, dtype = np.int16)
-	p = s.recv_into(img_rcv, int(size), socket.MSG_WAITALL)
+	buf = ''
+	while len(buf) < size:
+		buf += s.recv(size - len(buf))
 
-	img_rcv.tofile("temp.png")
-	img_rcv = mpimg.imread('temp.png')
+	pngdata = png.Reader(bytes=buf)
+	width, heigth, pngdata, meta = pngdata.asRGB()
+	image_2d = np.vstack(itertools.imap(np.uint16, pngdata))
 
-	return img_rcv
-
-
+	if meta["planes"] == 1:
+		return image_2d
+	else:
+		return np.reshape(image_2d, (heigth, width, meta["planes"]))
 
 
 plt.ion()
 fig = plt.figure()
-#~ ax = fig.add_subplot(111)
 
-#~ fig, ax = plt.subplots(111)
-#~ plt.subplots_adjust(left=0.25, bottom=0.25)
-#~ t = np.arange(0.0, 1.0, 0.001)
-a0 = 5
-f0 = 3
-#~ s = a0*np.sin(2*np.pi*f0*t)
-#~ l, = plt.plot(t, s, lw=2, color='red')
-#~ plt.axis([0, 1, -10, 10])
-
-axfreq = plt.axes([0.15, 0.5, 0.20, 0.03])
-axamp = plt.axes([0.40, 0.5, 0.20, 0.03])
-
-sfreq = Slider(axfreq, 'Freq', 0.1, 30.0, valinit=f0)
-samp = Slider(axamp, 'Amp', 0.1, 10.0, valinit=a0)
-
-def update(val):
-    print "update"
-    #~ amp = samp.val
-    #~ freq = sfreq.val
-    #~ l.set_ydata(amp*np.sin(2*np.pi*freq*t))
-    #~ fig.canvas.draw_idle()
-sfreq.on_changed(update)
-samp.on_changed(update)
-
-
-
-bot = fig.add_subplot(231)
-top = fig.add_subplot(232)
-cam = fig.add_subplot(233)
+bot = fig.add_subplot(131)
+top = fig.add_subplot(132)
+cam = fig.add_subplot(133)
 plt.show()
 
+botimg = False
+topimg = False
+camimg = False
 
 while 1:
 	img = r("bot")
-	bot.imshow(img, cmap='gray')
+	if botimg:
+		print "!! update botimg"
+		botimg.set_data(img)
+	else:
+		print "!! imshow botimg"
+		botimg = bot.imshow(img)
+
 
 	img = r("top")
-	top.imshow(img, cmap='gray')
+	if topimg:
+		print "!! update topimg"
+		topimg.set_data(img)
+	else:
+		print "!! imshow topimg"
+		topimg = top.imshow(img)
+
 
 	img = r("cam")
-	cam.imshow(img)
+	if camimg:
+		print "!! update camimg"
+		camimg.set_data(img)
+	else:
+		print "!! imshow camimg"
+		camimg = cam.imshow(img)
 
-	plt.pause(1)
-
-
+	plt.draw()
+	plt.pause(.001)
 
 
