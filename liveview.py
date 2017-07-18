@@ -2,10 +2,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import socket
 import struct
-import time
 import sys
-import png
-import itertools
+import cv2
 
 if (len(sys.argv) != 3):
 	print "usage: ", sys.argv[0], "tcp-socket-address", "tcp-socket-port"
@@ -40,14 +38,14 @@ def r(c):
 	while len(buf) < size:
 		buf += s.recv(size - len(buf))
 
-	pngdata = png.Reader(bytes=buf)
-	width, heigth, pngdata, meta = pngdata.asRGB()
-	image_2d = np.vstack(itertools.imap(np.uint16, pngdata))
+	arr = np.asarray(bytearray(buf), dtype=np.uint8)
+	image_2d = cv2.imdecode(arr,-1) # 'load it as it is'
+	shape = np.shape(image_2d)
+	if len(shape) > 2 and shape[2] == 3:
+		image_2d = np.reshape(image_2d, (shape[1], shape[0], shape[2]))
+		image_2d = cv2.cvtColor(image_2d, cv2.COLOR_BGR2RGB)
 
-	if meta["planes"] == 1:
-		return image_2d
-	else:
-		return np.reshape(image_2d, (heigth, width, meta["planes"]))
+	return image_2d
 
 
 plt.ion()
@@ -69,7 +67,7 @@ while 1:
 		botimg.set_data(img)
 	else:
 		print "!! imshow botimg"
-		botimg = bot.imshow(img)
+		botimg = bot.imshow(img, cmap='gray')
 
 
 	img = r("top")
@@ -78,7 +76,7 @@ while 1:
 		topimg.set_data(img)
 	else:
 		print "!! imshow topimg"
-		topimg = top.imshow(img)
+		topimg = top.imshow(img, cmap='gray')
 
 
 	img = r("cam")
