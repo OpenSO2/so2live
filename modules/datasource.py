@@ -5,16 +5,17 @@ that implementers do not need to worry about the details.
 ATM, only periodically requesting new data (polling) is supported, in the
 future (hopefully) pushing will also be implemented.
 """
+from __future__ import print_function
 import socket
 import struct
 import time
 import re
 import threading
-import cv2
 import numpy as np
+import cv2
 
 
-class DataSource:
+class DataSource(object):
 	"""Handles the connection and interfacing with the so2control software."""
 
 	_queue = {
@@ -39,14 +40,14 @@ class DataSource:
 		connected = False
 		while not connected:
 			try:
-				self._socket.connect((addr, port))
+				self._socket.connect(addr, port)
 				connected = True
 				print("connected")
 			except socket.error:
 				print("not yet connected")
 				time.sleep(1)
 
-	def _getdata(self, command):
+	def _sendcommand(self, command):
 		length = struct.pack("I", 3)
 		cmd = struct.pack("ccc", command[0].encode('ascii'),
 							command[1].encode('ascii'), command[2].encode('ascii'))
@@ -54,6 +55,7 @@ class DataSource:
 		self._socket.send(length)
 		self._socket.send(cmd)
 
+	def _receive(self):
 		buf = b''
 		while len(buf) < 4:
 			buf += self._socket.recv(4 - len(buf))
@@ -66,16 +68,12 @@ class DataSource:
 		while len(buf) < size:
 			buf += self._socket.recv(size - len(buf))
 
-		if command == "spc":
-			print("command spc")
-			# fixme: hardcoded spectrum length
-			rang = range(0, 2048 * 8, 8)
-			return [struct.unpack('<d', buf[i:i + 8])[0] for i in rang], {}
+		return buf
 
+	@staticmethod
+	def _handleimg(buf):
 		arr = np.asarray(bytearray(buf))
-
 		data = {}
-		data["name"] = command
 
 		for mesg in re.finditer(b'tEXt', buf):
 			length = int(arr[mesg.start() - 1])
@@ -94,11 +92,30 @@ class DataSource:
 
 		return image_2d, data
 
+	@staticmethod
+	def _handlespc(buf):
+		# fixme: hardcoded spectrum length
+		rang = range(0, 2048 * 8, 8)
+		return [struct.unpack('<d', buf[i:i + 8])[0] for i in rang], {}
+
+	def _getdata(self, command):
+		self._sendcommand(command)
+		buf = self._receive()
+
+		if command == "spc":
+			image_2d, data = self._handlespc(buf)
+		else:
+			image_2d, data = self._handleimg(buf)
+
+		data["name"] = command
+
+		return image_2d, data
+
 	def run_perio(self):
 		"""Start to periodically fetch updates from the camera."""
-		for type in self._queue:
-			if len(self._queue[type]):
-				self._run(type)
+		for typ in self._queue:
+			if self._queue[typ]:
+				self._run(typ)
 		self._timer = threading.Timer(1, self.run_perio)
 		self._timer.start()
 
@@ -112,7 +129,6 @@ class DataSource:
 
 	def _run(self, what):
 		img, data = self._getdata(what)
-		if img == []:
-			return None
-		for fct in self._queue[what]:
-			fct(img, data)
+		if img:
+			for fct in self._queue[what]:
+				fct(img, data)

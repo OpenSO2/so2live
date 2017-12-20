@@ -1,0 +1,18 @@
+language: python
+
+# Use containers instead of full VMs for faster startup.
+sudo: false
+
+python:
+  - "2.7"
+  - "3.5"
+
+install:
+  - pip install flake8
+  - pip install pydocstyle
+  - pip install pylint
+  - pip install tox-travis
+  - pip install matplotlib
+  - pip install opencv-python
+
+script: make test

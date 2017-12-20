@@ -35,13 +35,14 @@ useful for camera alignment and focusing
                   [ Overlay toggle button ]
 
 """
+from __future__ import print_function
 from __future__ import division
 import sys
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.widgets import Slider, Button
 from modules.datasource import DataSource
-import numpy as np
 
 if len(sys.argv) != 2:
 	print("usage: ", sys.argv[0], "tcp-socket-address:tcp-socket-port")
@@ -49,7 +50,7 @@ if len(sys.argv) != 2:
 	exit(-1)
 
 
-class Liveview:
+class Liveview(object):
 	"""Simple live view gui."""
 
 	host, port = sys.argv[1].split(":")
@@ -109,13 +110,13 @@ class Liveview:
 		button = Button(btnax, 'Overlay mode')
 		button.on_clicked(self.toggle_visibility)
 
-#		self.datasource.listen("bot", self.makeupdatefunc("bot"))
-#		self.datasource.listen("top", self.makeupdatefunc("top"))
-#		self.datasource.listen("bot", self.update_abs)
-#		self.datasource.listen("top", self.update_abs)
-	#	self.datasource.listen("top", self.makeupdatefunc("ovltop"))
-#		self.datasource.listen("bot", self.makeupdatefunc("ovlbot"))
-#		self.datasource.listen("cam", self.makeupdatefunc("cam"))
+		self.datasource.listen("bot", self.makeupdatefunc("bot"))
+		self.datasource.listen("top", self.makeupdatefunc("top"))
+		self.datasource.listen("bot", self.update_abs)
+		self.datasource.listen("top", self.update_abs)
+		self.datasource.listen("top", self.makeupdatefunc("ovltop"))
+		self.datasource.listen("bot", self.makeupdatefunc("ovlbot"))
+		self.datasource.listen("cam", self.makeupdatefunc("cam"))
 		self.datasource.listen("spc", self.makeupdatefunc_spc())
 
 		plt.show()
@@ -135,7 +136,6 @@ class Liveview:
 		"""Create the update functions."""
 		def update_spc(data, _):
 			"""Update spectrum."""
-			print("update spc")
 			self.imgs["spc"].set_data(range(0, len(data)), data)
 			self.axs["spc"].relim()
 			self.axs["spc"].autoscale_view()
@@ -155,7 +155,7 @@ class Liveview:
 			self.bot = data
 
 		if self.bot is None or self.top is None:
-			return None
+			return
 
 		img = self.calc_abs(self.top, self.bot)
 		self.update_absimg(img, None)

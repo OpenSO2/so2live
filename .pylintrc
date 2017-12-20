@@ -1,0 +1,7 @@
+[MESSAGES CONTROL]
+# bad-continuation doesn't really work with tabs
+disable=bad-continuation
+indent-string="\t"
+
+[TYPECHECK]
+ignored-modules = numpy,cv2
