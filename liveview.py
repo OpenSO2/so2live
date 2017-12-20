@@ -1,93 +1,176 @@
-import matplotlib.pyplot as plt
-import numpy as np
-import socket
-import struct
-import sys
-import cv2
+"""A simple live view sample application to demonstrate the datasource module.
 
-if (len(sys.argv) != 3):
-	print "usage: ", sys.argv[0], "tcp-socket-address", "tcp-socket-port"
-	print "eg:    ", sys.argv[0], "localhost", "27000"
+It has two views: an overview and a overlay view. The latter is
+useful for camera alignment and focusing
+
+  View 1:
+  |-------| |------------------|  |-------|
+  |310nm  | | compound         |  |webcam |
+  |       | |                  |  |       |
+  |-------| |                  |  |-------|
+            |                  |
+  |-------| |                  |  |-------|
+  |330nm  | |                  |  |spectro|
+  |       | |                  |  |       |
+  |-------| |------------------|  |-------|
+
+                  [ Overlay toggle button ]
+
+
+  View 2:
+  |---------------------------------------|
+  | overlay of 310 over 330nm image       |
+  |                                       |
+  |                                       |
+  |                                       |
+  |                                       |
+  |                                       |
+  |                                       |
+  |                                       |
+  |                                       |
+  |---------------------------------------|
+
+  |--Overlay slider---------*-------------| 70%
+
+                  [ Overlay toggle button ]
+
+"""
+from __future__ import division
+import sys
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+from matplotlib.widgets import Slider, Button
+from modules.datasource import DataSource
+import numpy as np
+
+if len(sys.argv) != 2:
+	print("usage: ", sys.argv[0], "tcp-socket-address:tcp-socket-port")
+	print("eg:    ", sys.argv[0], "localhost:7009")
 	exit(-1)
 
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-# Wait for socket to appear and retry every second
-connected = False
-while not connected:
-	try:
-		s.connect((sys.argv[1], int(sys.argv[2])))
-		connected = True
-	except Exception as e:
-		print "not yet connected"
-		time.sleep(1)
+class Liveview:
+	"""Simple live view gui."""
 
-def r(c):
-	l = struct.pack("I", 3)
-	cmd = struct.pack("ccc", c[0], c[1], c[2])
+	host, port = sys.argv[1].split(":")
+	host = host or "localhost"
+	port = port or "7009"
 
-	s.send(l)
-	s.send(cmd)
+	datasource = DataSource()
 
-	buf = ''
-	while len(buf) < 4:
-		buf += s.recv(4 - len(buf))
-	size = struct.unpack('i', buf)[0]
+	gsp = gridspec.GridSpec(2, 4, left=0.01, bottom=0.01, right=.99, top=0.99,
+						wspace=0.04, hspace=0.04)
+	gsp2 = gridspec.GridSpec(1, 1, left=0.01, bottom=0.01, right=.99, top=0.99)
 
-	buf = ''
-	while len(buf) < size:
-		buf += s.recv(size - len(buf))
+	axs = {}
+	imgs = {}
 
-	arr = np.asarray(bytearray(buf), dtype=np.uint8)
-	image_2d = cv2.imdecode(arr,-1) # 'load it as it is'
-	shape = np.shape(image_2d)
-	if len(shape) > 2 and shape[2] == 3:
-		image_2d = np.reshape(image_2d, (shape[1], shape[0], shape[2]))
-		image_2d = cv2.cvtColor(image_2d, cv2.COLOR_BGR2RGB)
+	bot = top = None
+	visible = False
 
-	return image_2d
+	def __init__(self):
+		"""Start the gui."""
+		self.fig = plt.figure(figsize=(11, 4))
+		self.datasource.connect(self.host, int(self.port))
+		self.datasource.run_perio()
+
+		self.axs["bot"] = self.fig.add_subplot(self.gsp[0, 0])
+		self.axs["top"] = self.fig.add_subplot(self.gsp[1, 0])
+		self.axs["abs"] = self.fig.add_subplot(self.gsp[0:2, 1:3])
+		self.axs["cam"] = self.fig.add_subplot(self.gsp[0, -1])
+		self.axs["spc"] = self.fig.add_subplot(self.gsp[1, -1])
+		self.axs["ovl"] = self.fig.add_subplot(self.gsp2[0, 0])
+
+		self.imgs["bot"] = self.axs["bot"].imshow([[0]], cmap='gray')
+		self.imgs["top"] = self.axs["top"].imshow([[0]], cmap='gray')
+		self.imgs["abs"] = self.axs["abs"].imshow([[0]], cmap='gray')
+		self.imgs["cam"] = self.axs["cam"].imshow([[0]])
+		self.imgs["spc"], = self.axs["spc"].plot([0], [0])
+		self.imgs["ovlbot"] = self.axs["ovl"].imshow([[0]], cmap='gray')
+		self.imgs["ovltop"] = self.axs["ovl"].imshow([[0]], cmap='gray')
+
+		for item in "bot top abs cam ovl spc".split(" "):
+			self.axs[item].set_yticklabels([])
+			self.axs[item].set_xticklabels([])
+			self.axs[item].set_yticks([])
+			self.axs[item].set_xticks([])
+
+		# add slide to choose the transparency of the overlayed image
+		self.axtrans = plt.axes([0.25, 0.15, 0.65, 0.03])
+		strans = Slider(self.axtrans, 'Transparency', 0., 1., valinit=.5)
+		strans.on_changed(self.imgs["ovltop"].set_alpha)
+		self.imgs["ovltop"].set_alpha(.5)
+
+		self.update_absimg = self.makeupdatefunc("abs")
+
+		self.toggle_visibility(None)
+
+		btnax = plt.axes([0.8, 0.025, 0.1, 0.04])
+		button = Button(btnax, 'Overlay mode')
+		button.on_clicked(self.toggle_visibility)
+
+#		self.datasource.listen("bot", self.makeupdatefunc("bot"))
+#		self.datasource.listen("top", self.makeupdatefunc("top"))
+#		self.datasource.listen("bot", self.update_abs)
+#		self.datasource.listen("top", self.update_abs)
+	#	self.datasource.listen("top", self.makeupdatefunc("ovltop"))
+#		self.datasource.listen("bot", self.makeupdatefunc("ovlbot"))
+#		self.datasource.listen("cam", self.makeupdatefunc("cam"))
+		self.datasource.listen("spc", self.makeupdatefunc_spc())
+
+		plt.show()
+		self.datasource.stop_perio()
+
+	def makeupdatefunc(self, val):
+		"""Create the update functions."""
+		def update(data, _):
+			"""Update the source image."""
+			self.imgs[val].set_data(data)
+			self.imgs[val].set_clim(data.min(), data.max())
+			self.axs[val[:3]].set_aspect(data.shape[0] / data.shape[1])
+			plt.draw()
+		return update
+
+	def makeupdatefunc_spc(self):
+		"""Create the update functions."""
+		def update_spc(data, _):
+			"""Update spectrum."""
+			print("update spc")
+			self.imgs["spc"].set_data(range(0, len(data)), data)
+			self.axs["spc"].relim()
+			self.axs["spc"].autoscale_view()
+			plt.draw()
+		return update_spc
+
+	@staticmethod
+	def calc_abs(i310, i330):
+		"""Very roughly calculate absorbance."""
+		return -np.log10(i310 / i330)
+
+	def update_abs(self, data, metadata):
+		"""Update absorbance image."""
+		if metadata["name"] == "top":
+			self.top = data
+		if metadata["name"] == "bot":
+			self.bot = data
+
+		if self.bot is None or self.top is None:
+			return None
+
+		img = self.calc_abs(self.top, self.bot)
+		self.update_absimg(img, None)
+		plt.draw()
+
+	def toggle_visibility(self, _):
+		"""Toggle between the two views."""
+		self.visible = not self.visible
+		self.axs["cam"].set_visible(self.visible)
+		self.axs["top"].set_visible(self.visible)
+		self.axs["bot"].set_visible(self.visible)
+		self.axs["spc"].set_visible(self.visible)
+		self.axs["ovl"].set_visible(not self.visible)
+		self.axtrans.set_visible(not self.visible)
+		plt.draw()
 
 
-plt.ion()
-fig = plt.figure()
-
-bot = fig.add_subplot(131)
-top = fig.add_subplot(132)
-cam = fig.add_subplot(133)
-plt.show()
-
-botimg = False
-topimg = False
-camimg = False
-
-while 1:
-	img = r("bot")
-	if botimg:
-		print "!! update botimg"
-		botimg.set_data(img)
-	else:
-		print "!! imshow botimg"
-		botimg = bot.imshow(img, cmap='gray')
-
-
-	img = r("top")
-	if topimg:
-		print "!! update topimg"
-		topimg.set_data(img)
-	else:
-		print "!! imshow topimg"
-		topimg = top.imshow(img, cmap='gray')
-
-
-	img = r("cam")
-	if camimg:
-		print "!! update camimg"
-		camimg.set_data(img)
-	else:
-		print "!! imshow camimg"
-		camimg = cam.imshow(img)
-
-	plt.draw()
-	plt.pause(.001)
-
-
+Liveview()
